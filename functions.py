@@ -1,6 +1,6 @@
 import numpy as np
 import pyreaper
-from scipy import signal
+import scipy.signal.windows as windows
 
 def my_acf(x, m):
     N = len(x)
@@ -27,27 +27,43 @@ def my_dtft(x, fs, f):
 
 def psola(x, fs, k):
     x_int16 = (x * 32767).astype(np.int16)
-    pm_times, pm, _, _, _ = pyreaper.reaper(x_int16, fs)
-    
-    marks = (pm_times * fs).astype(int)
-    marks = marks[pm == 1]
-    
-    output = np.zeros(int(len(x) / k) + fs)
-    last_idx = 0
-    
-    for i in range(1, len(marks) - 1):
-        T = marks[i] - marks[i-1]
-        start, end = marks[i] - T, marks[i] + T
-        if start < 0 or end > len(x): continue
-        
-        segment = x[start:end].copy()
-        window = signal.windows.triang(len(segment))
-        segment *= window
-        
-        new_pos = int(last_idx)
-        if new_pos + len(segment) < len(output):
-            output[new_pos:new_pos + len(segment)] += segment
-        
-        last_idx += T / k
-            
-    return output / np.max(np.abs(output))
+    pm_times, _, _, _, _ = pyreaper.reaper(x_int16, fs)
+    pm_samples = (pm_times * fs).astype(int)
+
+    new_len = int(len(x) / k)
+    y = np.zeros(new_len)
+
+    for i in range(1, len(pm_samples) - 1):
+        center = pm_samples[i]
+
+        T_prev = center - pm_samples[i-1]
+        T_next = pm_samples[i+1] - center
+        T_samples = (T_prev + T_next) // 2
+
+        half_len = T_samples
+        start_idx = center - half_len
+        end_idx = center + half_len
+
+        if start_idx < 0 or end_idx >= len(x):
+            continue
+
+        segment = x[start_idx:end_idx].copy()
+
+        window = windows.triang(len(segment))
+        windowed_segment = segment * window
+
+        new_center = int(center / k)
+        new_start = new_center - half_len
+        new_end = new_center + half_len
+
+        if new_start < 0 or new_end > new_len:
+            continue
+
+        act_len = len(windowed_segment)
+        if new_start + act_len <= new_len:
+            y[new_start:new_start+act_len] += windowed_segment
+        else:
+            act_len = new_len - new_start
+            y[new_start:new_start+act_len] += windowed_segment[:act_len]
+
+    return y

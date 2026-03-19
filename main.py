@@ -5,7 +5,7 @@ from statsmodels.tsa.stattools import acf as stats_acf
 import pyreaper
 from functions import my_acf, my_dtft, psola
 
-fs, data = wavfile.read('./voice/input.wav')
+fs, data = wavfile.read('./voice/input1.wav')
 if len(data.shape) > 1:
     data = data[:, 0]
 x = data.astype(np.float32) / np.max(np.abs(data))

@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io.wavfile as wavfile
-import sys
 
 def shift(x, fs, dt, at, f):
     t = np.arange(len(x)) / fs
@@ -63,69 +62,3 @@ def apply_chorus(input_file, output_file):
 
 if __name__ == "__main__":
     apply_chorus("voice/input.wav", "voice/output.wav")
-
-    n1 = np.arange(-5, 10)
-    x_n1 = np.where((n1 >= 0) & (n1 < 4), 1.0, 0.0)
-
-    t1 = np.linspace(-5, 10, 1000)
-
-    x_linear1 = np.interp(t1, n1, x_n1)
-
-    x_shannon1 = np.zeros_like(t1)
-    for i, n_val in enumerate(n1):
-        x_shannon1 += x_n1[i] * np.sinc(t1 - n_val)
-
-    fig1, (ax1_5, ax2_5) = plt.subplots(2, 1, figsize=(10, 8))
-
-    ax1_5.stem(n1, x_n1, linefmt='k-', markerfmt='ko', basefmt='k-', label='Дискретный x[n]')
-    ax1_5.plot(t1, x_linear1, 'g-', label='Линейная (numpy.interp)')
-    ax1_5.set_title('Задание 5: Линейная интерполяция импульса')
-    ax1_5.grid(True)
-    ax1_5.legend()
-
-    ax2_5.stem(n1, x_n1, linefmt='k-', markerfmt='ko', basefmt='k-', label='Дискретный x[n]')
-    ax2_5.plot(t1, x_shannon1, 'b-', label='Идеальное восстановление (Уиттекер-Шеннон)')
-    ax2_5.set_title('Задание 5: Идеальное восстановление импульса')
-    ax2_5.grid(True)
-    ax2_5.legend()
-
-    plt.tight_layout()
-    plt.show()
-
-    n2 = np.arange(-5, 20)
-    x_n2 = np.zeros_like(n2, dtype=float)
-
-    for i, val in enumerate(n2):
-        if 0 <= val < 5:
-            x_n2[i] = 1
-        elif 5 <= val < 10:
-            x_n2[i] = val - 5
-        elif 10 <= val < 15:
-            x_n2[i] = val - 10
-        else:
-            x_n2[i] = 0
-
-    t2 = np.linspace(-5, 20, 1500)
-
-    x_linear = np.interp(t2, n2, x_n2)
-
-    x_shannon2 = np.zeros_like(t2)
-    for i, val in enumerate(n2):
-        x_shannon2 += x_n2[i] * np.sinc(t2 - val)
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-
-    ax1.stem(n2, x_n2, linefmt='k-', markerfmt='ko', basefmt='k-', label='Дискретный x[n]')
-    ax1.plot(t2, x_linear, 'g-', label='Линейная (numpy.interp)')
-    ax1.set_title('Задание 6: Линейная интерполяция')
-    ax1.grid(True)
-    ax1.legend()
-
-    ax2.stem(n2, x_n2, linefmt='k-', markerfmt='ko', basefmt='k-', label='Дискретный x[n]')
-    ax2.plot(t2, x_shannon2, 'b-', label='Восстановление sinc-функциями')
-    ax2.set_title('Задание 6: Идеальное восстановление (Уиттекер-Шеннон)')
-    ax2.grid(True)
-    ax2.legend()
-
-    plt.tight_layout()
-    plt.show()

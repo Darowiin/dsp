@@ -12,8 +12,8 @@ from scipy.io import wavfile
 def dft(x: np.ndarray) -> np.ndarray:
     N = len(x)
     n = np.arange(N)
-    k = n.reshape((N, 1))
-    e = np.exp(-2j * np.pi * k * n / N)
+    m = n.reshape((N, 1))
+    e = np.exp(-2j * np.pi * m * n / N)
     return np.dot(e, x)
 
 

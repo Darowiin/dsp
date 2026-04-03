@@ -99,90 +99,23 @@ def hz_to_note(hz: float) -> str:
 def main() -> None:
     unittest.main(exit=False)
 
-    # Загружаем wav-файл
     fs, x = wavfile.read('voice/6412-27.wav')
     if len(x.shape) > 1:
         x = x[:, 0]
 
-    # Высчитываем STFT
     nperseg = 4096
     noverlap = 4096 - 512
     f_stft, t_stft, spectrum = stft(x, fs=fs, nperseg=nperseg, noverlap=noverlap)
     power = np.abs(spectrum) ** 2
 
-    # Визуализация КВПФ
     plt.figure('Spectrogram')
     plt.pcolormesh(t_stft, f_stft, power, shading='auto')
     plt.xlabel('Time [sec]')
     plt.ylabel('Frequency [Hz]')
-    plt.ylim(0, 2000)
+    plt.ylim(0, 1500)
     plt.colorbar(label='Power')
     plt.savefig('spectrogram.png')
-    # plt.show() # Можно раскомментировать для вывода графика на экран
-
-    # Опциональное усложнение: автоматическое определение темпа, высоты и длительностей нот
-    max_power = np.max(power)
-    threshold = 0.05 * max_power
-    
-    valid_f_idx = (f_stft > 20) & (f_stft < 4000)
-    f_valid = f_stft[valid_f_idx]
-    power_valid = power[valid_f_idx, :]
-    
-    notes = []
-    for i in range(len(t_stft)):
-        idx = np.argmax(power_valid[:, i])
-        if power_valid[idx, i] > threshold:
-            notes.append(f_valid[idx])
-        else:
-            notes.append(0.0)
-            
-    sequence = []
-    current_note = None
-    start_time = 0.0
-    for i, freq in enumerate(notes):
-        n = hz_to_note(freq) if freq > 0 else "Rest"
-        if n != current_note:
-            if current_note is not None:
-                dur = t_stft[i] - start_time
-                if dur > 0.05: 
-                    sequence.append((current_note, dur))
-            current_note = n
-            start_time = t_stft[i]
-    dur = t_stft[-1] - start_time
-    if dur > 0.05:
-        sequence.append((current_note, dur))
-        
-    print("\n--- Автоматическая транскрипция ---")
-    
-    # Объединение ноты и пауз после нее (для получения полных долей)
-    merged_sequence = []
-    for num, dt in sequence:
-        if num != "Rest":
-            merged_sequence.append({'note': num, 'dur': dt})
-        elif merged_sequence and dt < 0.5:
-            merged_sequence[-1]['dur'] += dt
-
-    note_durations = [item['dur'] for item in merged_sequence]
-    if note_durations:
-        # Примем за четвертную ноту длительность, которая встречается чаще всего (через медиану или мин. кластер)
-        # В нашем фрагменте: 0.6 сек - четвертная, 0.9 сек - с точкой, 0.3 сек - восьмая.
-        # Пусть четвертная = ~0.60
-        quarter_dur = 0.60
-        bpm = 60.0 / quarter_dur
-        
-        print(f"Ожидаемый темп: {bpm:.1f} уч. четвертных нот в минуту (Четвертная нота = {quarter_dur:.3f}с)\n")
-        print("Определенные ноты и их относительные длительности:")
-        for block in sequence:
-            n = block[0]
-            d = block[1]
-            rel = d / quarter_dur  # 1.0 для четвертной, 0.5 для восьмой
-            
-            # Округлим rel к ближайшим нотным долям (1, 0.5, 1.5 и т.д.)
-            rel_rounded = round(rel * 2) / 2
-            
-            print(f"Нота: {n:>4} | Длительность (с): {d:.3f} | Относительная длительность: {rel_rounded:.1f}")
-    else:
-        print("Ноты не найдены.")
+    plt.show()
 
 
 if __name__ == "__main__":

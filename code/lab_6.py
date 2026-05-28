@@ -86,6 +86,8 @@ def M_and_w0(y, h_est):
     w0 = 2 * np.pi * k / N
     M = int(np.round(N / (2 * k)))
 
+    print(f"[ДЛЯ ОТЧЕТА №3] Точное значение K_max = {k}\n")
+
     plt.figure(figsize=(10, 4))
     plt.plot(np.abs(spectrum[:half_len]))
     plt.axvline(k, color='r', linestyle='--', label='w0')
@@ -196,6 +198,10 @@ def calculate_mse(recovered, decoded_text, M):
     corr = correlate(recovered, ideal, mode='full')
     delay = np.argmax(corr) - len(ideal) + 1 # здесь corr - индекс, а не реальный сдвиг. correlate возвращает массив суммарной длины обоих сигналов-1
 
+    print()
+    print(f"[ДЛЯ ОТЧЕТА №5] Точный delay = {delay}")
+    print()
+
     recovered_aligned = np.roll(recovered, -delay)[:len(ideal)]
     mse = np.mean((ideal - recovered_aligned) ** 2)
 
@@ -205,6 +211,7 @@ def calculate_mse(recovered, decoded_text, M):
 
 def main():
     y, v, h_all = read_data("data/6412-27.npy")
+    print(f"[ДЛЯ ОТЧЕТА №3] Точное значение N = {len(y)}")
     
     h_est = analyze_noise(v, h_all)
 
@@ -214,9 +221,9 @@ def main():
     print("Их точные значения для формулы:")
     for idx in significant_indices:
         print(f"h[{idx}] = {h_est[idx]:.6f}")
-    
-    print("\n")
-    
+
+    print()
+
     w0, M = M_and_w0(y, h_est)
     x_recovered, x_bin = recover(y, h_est, w0, M)
     decoded_text = decode_message(x_bin, M)

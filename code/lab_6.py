@@ -1,148 +1,227 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import convolve, deconvolve
-import itertools
-from morse_encode import morse_encode, MORSE_CODES
+from statsmodels.tsa.stattools import acf
+from scipy.signal import deconvolve, convolve, correlate
+from scipy.fft import fft
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
-def build_lowpass_filter(w0, N=51):
-    h_lp = np.zeros(N)
-    center = N // 2
-    for i in range(N):
-        n = i - center
-        if n == 0:
-            h_lp[i] = w0 / np.pi
-        else:
-            h_lp[i] = np.sin(w0 * n) / (np.pi * n)
+from morse_encode import MORSE_CODES, morse_encode
+
+def read_data(path):
+    data = np.load(path)
+    y = np.ravel(data[0, :])   
+    v = np.ravel(data[1, :])     
+    h = data[2:, :]            
+    return y, v, h
+
+
+def analyze_noise(v, h_all):
+    v_chunk = v[1000:3000]
+    V = fft(v_chunk)
+    V_power = np.abs(V)**2
+    V_norm = V_power / np.mean(V_power)
+
+    r = acf(v, nlags=100)
+
+    h_est_full = np.mean(h_all, axis=0)
+    h_est = h_est_full[:200]
+    h_est[np.abs(h_est) < 1e-4] = 0
+
+    lb = acorr_ljungbox(v, lags=[10, 30, 50], return_df=True)
+    print("\nBox test:")
+    print(lb)
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(V_norm)
+    plt.title("Спектр шума")
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.stem(r)
+    plt.title("Автокорреляция шума")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    plt.figure(figsize=(10, 4))
+    plt.stem(h_est)
+    plt.title("Оценка импульсной характеристики h[n]")
+    plt.grid(True)
+    plt.show()
+
+    return h_est
+
+
+def build_lowpass_filter(w0, n):
+    #h[n] = sin(w0 * n) / (pi * n)
+  
+    mid = n // 2
+    time_axis = np.arange(-mid, mid + 1)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        h_lp = np.sin(w0 * time_axis) / (np.pi * time_axis)
+
+    h_lp[mid] = w0 / np.pi
+    h_lp *= np.hamming(len(h_lp))
+    h_lp /= np.sum(h_lp)
+
+    plt.figure(figsize=(8, 3))
+    plt.plot(h_lp)
+    plt.title(f"ИХ НЧ-фильтра w0 = {w0:.4f}")
+    plt.grid(True)
+    plt.show()
+
     return h_lp
 
-def main():
-    # === 1. ЗАГРУЗКА ДАННЫХ ===
-    print("Загрузка данных...")
-    data = np.load("data/6412-27.npy")
-    y = np.ravel(data[0, :])
-    v = np.ravel(data[1, :])
-    h_noisy_samples = data[2:, :]
 
-    # === 2. ОЦЕНКА ИМПУЛЬСНОЙ ХАРАКТЕРИСТИКИ ===
-    h_estimated = np.mean(h_noisy_samples, axis=0)[:200]  # Берем первые 200 отсчетов
-    threshold_h = 0.02 * np.max(np.abs(h_estimated))
-    h_cleaned = np.where(np.abs(h_estimated) < threshold_h, 0.0, h_estimated)
-    h_final = np.trim_zeros(h_cleaned, trim='fb')
-
-    # === 3. ОПРЕДЕЛЕНИЕ ПАРАМЕТРОВ МОРЗЕ ===
-    chunk_size = min(50000, len(y))
-    y_chunk = y[:chunk_size]
-    y_zero_mean = y_chunk - np.mean(y_chunk)
-    spectrum_y = np.abs(np.fft.rfft(y_zero_mean))
-    frequencies = np.fft.rfftfreq(len(y_zero_mean), d=1.0)
+def M_and_w0(y, h_est):
+    x_1, _ = deconvolve(y, h_est)
+    N = len(x_1)
+    spectrum = fft(x_1 - np.mean(x_1))
     
-    peak_idx = np.argmax(spectrum_y[1:]) + 1
-    f_peak = frequencies[peak_idx]
-    
-    M = round(1.0 / (2.0 * f_peak))
-    w0 = np.pi / M
-    h_lp = build_lowpass_filter(w0, N=51)
+    half_len = N // 2
+    spectrum_amp = np.abs(spectrum[:half_len])
+    k = np.argmax(spectrum_amp)
 
-    # === 4. ФИЛЬТРАЦИЯ И ДЕКОНВОЛЮЦИЯ ВСЕГО СИГНАЛА ===
-    print("Фильтрация и развёртка ВСЕГО сигнала...")
-    y_filtered = convolve(y, h_lp, mode='full')
-    x_hat, _ = deconvolve(y_filtered, h_final)
+    w0 = 2 * np.pi * k / N
+    M = int(np.round(N / (2 * k)))
 
-    # === 5. АВТОМАТИЧЕСКОЕ ДЕКОДИРОВАНИЕ МОРЗЕ ===
-    # Применяем пороговую обработку ко всей длине
-    x_hat_thresholded = np.where(x_hat >= 0.5, 1.0, 0.0)
+    plt.figure(figsize=(10, 4))
+    plt.plot(np.abs(spectrum[:half_len]))
+    plt.axvline(k, color='r', linestyle='--', label='w0')
+    plt.axvline(k * 2, color='r', linestyle=':', label='2w0')
+    plt.axvline(k * 3, color='r', linestyle='--', label='3w0')
+    plt.title("Амплитудный спектр")
+    plt.legend()
+    plt.show()
 
-    # Группируем непрерывные блоки нулей и единиц
-    groups = [(key, len(list(group))) for key, group in itertools.groupby(x_hat_thresholded)]
+    print(f"Частота среза w0 = {w0:.5f}")
+    print(f"Размер точки M = {M}")
 
-    # Отрезаем длинную тишину в самом начале и конце файла, если она есть
-    if groups and groups[0][0] == 0 and groups[0][1] > 5 * M:
-        groups.pop(0)
-    if groups and groups[-1][0] == 0 and groups[-1][1] > 5 * M:
-        groups.pop()
+    return w0, M
 
-    morse_elements = []
-    for val, length in groups:
-        if val == 1:
-            if length < 2 * M:
-                morse_elements.append('.')
-            else:
-                morse_elements.append('-')
-        else:
-            if length > 5 * M:
-                morse_elements.append(' / ')  # Разделитель слов (7 у.е.)
-            elif length > 2 * M:
-                morse_elements.append(' ')    # Разделитель букв (3 у.е.)
 
-    morse_str = "".join(morse_elements).strip()
-    
-    # Словарик для обратного декодирования
-    REVERSE_MORSE = {v: k for k, v in MORSE_CODES.items() if v not in [" ", "   ", "       "]}
-    
-    decoded_words = []
-    for word in morse_str.split(' / '):
-        decoded_word = "".join([REVERSE_MORSE.get(letter, '?') for letter in word.split(' ') if letter])
-        decoded_words.append(decoded_word)
-    
-    final_sentence = " ".join(decoded_words).upper()
+def recover(y, h_est, w0, M):
 
-    # === 6. ГЕНЕРАЦИЯ ИДЕАЛА И ВЫЧИСЛЕНИЕ ЧЕСТНОГО MSE ===
-    x_ideal = morse_encode(final_sentence.lower(), unit_size=M)
+    h_n = build_lowpass_filter(w0, 51)
+    y_filtered = convolve(y, h_n)
+    x_recovered, _ = deconvolve(y_filtered, h_est)
 
-    # Линейно масштабируем амплитуду x_hat для честного сравнения
-    x_min, x_max = np.min(x_hat), np.max(x_hat)
-    x_hat_scaled = (x_hat - x_min) / (x_max - x_min) if (x_max - x_min) > 0 else x_hat
+    x_bin = (x_recovered > 0.5).astype(int)
 
-    # Ищем идеальное совмещение по минимальному MSE (сканируем область задержки)
-    best_mse = float('inf')
-    best_delay = 0
-    for test_delay in range(0, 150):
-        x_hat_trimmed = x_hat_scaled[test_delay : test_delay + len(x_ideal)]
-        if len(x_hat_trimmed) == len(x_ideal):
-            current_mse = np.mean((x_ideal - x_hat_trimmed) ** 2)
-            if current_mse < best_mse:
-                best_mse = current_mse
-                best_delay = test_delay
+    plt.figure(figsize=(12, 6))
 
-    x_hat_final_aligned = x_hat_scaled[best_delay : best_delay + len(x_ideal)]
-    x_hat_thresholded_final = np.where(x_hat_final_aligned >= 0.5, 1.0, 0.0)
-
-    # ========================================
-    # === ВЫВОД ДАННЫХ В КОНСОЛЬ ДЛЯ ОТЧЕТА ===
-    # ========================================
-    print("\n" + "="*40)
-    print("=== ИТОГОВЫЕ ДАННЫЕ ДЛЯ ТВОЕГО ОТЧЕТА ===")
-    print("="*40)
-    print(f"1. Размер одной точки (M): {M} отсчётов [cite: 367, 391]")
-    print(f"2. Частота среза ФНЧ (w0): {w0:.4f} рад/отсчёт [cite: 369, 391]")
-    print(f"3. РАСШИФРОВАННОЕ ПРЕДЛОЖЕНИЕ: {final_sentence} [cite: 344, 418]")
-    print(f"4. Строка Морзе: {morse_str}")
-    print(f"5. Оптимальный временной сдвиг: {best_delay} отсчётов [cite: 389, 458]")
-    print(f"6. Минимальная ошибка (MSE_ФНЧ): {best_mse:.5f} [cite: 344, 469]")
-    print("="*40)
-
-    print("\nОтображение графиков... Закрой окно с графиками, чтобы завершить программу.")
-    
-    plt.figure(figsize=(12, 8))
-
-    # Верхний график: Сравнение восстановленной волны (до порога) и идеала
     plt.subplot(2, 1, 1)
-    plt.plot(x_ideal, color='blue', alpha=0.5, linewidth=2, label="Идеальный сигнал x[n]")
-    plt.plot(x_hat_final_aligned, color='orange', label="Восстановленная оценка x_hat[n]")
-    plt.title("Восстановленный сигнал после ФНЧ и развёртки (Выровненный)")
+    plt.plot(y_filtered, color='red')
+    plt.title(f"После НЧ-фильтра (M={M})")
     plt.grid(True)
-    plt.legend()
 
-    # Нижний график: Пороговый сигнал (бинарный 0 или 1) готовый к чтению
     plt.subplot(2, 1, 2)
-    plt.plot(x_ideal, color='blue', alpha=0.5, linewidth=2, label="Идеальный сигнал x[n]")
-    plt.plot(x_hat_thresholded_final, color='green', label="Пороговый сигнал (>= 0.5)")
-    plt.title("Сигнал, готовый к декодированию Морзе")
-    plt.grid(True)
+    plt.plot(x_recovered, label="восстановленный")
+    plt.step(range(len(x_bin)), x_bin, where='post', label="бинарный")
+    plt.title("Восстановленный сигнал")
     plt.legend()
+    plt.grid(True)
 
     plt.tight_layout()
     plt.show()
+
+    return x_recovered, x_bin
+
+def segments(x_bin):
+    runs = []
+    if len(x_bin) == 0:
+        return []
+    
+    current = x_bin[0]
+    length = 1
+
+    for val in x_bin[1:]:
+        if val == current:
+            length += 1
+        else:
+            runs.append((current, length))
+            current = val
+            length = 1
+    runs.append((current, length))
+    
+    return runs
+
+
+def morse(segments, M):
+    morse = ""
+    for i, (val, length) in enumerate(segments):
+        if val == 1:                 
+            if length < 1.5 * M:        
+                morse += "."
+            else:                   
+                morse += "-"
+        else:                          
+            if length < 2 * M:         
+                pass
+            elif length < 4 * M:       
+                morse += " "
+            else:                      
+                morse += "   "
+    
+    morse = morse.strip()
+    return morse
+
+
+def morse_text(morse_code):
+    decode = {v: k for k, v in MORSE_CODES.items()}
+    words = morse_code.split("   ")
+    result = []
+    for word in words:
+        letters = word.split(" ")
+        decoded_letters = []
+        for letter in letters:
+            if letter in decode:
+                decoded_letters.append(decode[letter])
+        result.append("".join(decoded_letters))
+    return " ".join(result)
+
+
+def decode_message(x_bin, M):
+    runs = segments(x_bin)
+    morse_code = morse(runs, M)
+    text = morse_text(morse_code)
+    print("Morse:", morse_code)
+    print("Decoded:", text)
+    return text
+
+
+def calculate_mse(recovered, decoded_text, M):
+    ideal = morse_encode(decoded_text, M)
+    corr = correlate(recovered, ideal, mode='full')
+    delay = np.argmax(corr) - len(ideal) + 1 # здесь corr - индекс, а не реальный сдвиг. correlate возвращает массив суммарной длины обоих сигналов-1
+
+    recovered_aligned = np.roll(recovered, -delay)[:len(ideal)]
+    mse = np.mean((ideal - recovered_aligned) ** 2)
+
+    print(f"MSE: {mse:.6f}")
+    return mse
+
+
+def main():
+    y, v, h_all = read_data("data/6412-27.npy")
+    
+    h_est = analyze_noise(v, h_all)
+
+    max_val = np.max(np.abs(h_est))
+    significant_indices = np.where(np.abs(h_est) > 0.05 * max_val)[0]
+    print("\nИндексы:", significant_indices)
+    print("Их точные значения для формулы:")
+    for idx in significant_indices:
+        print(f"h[{idx}] = {h_est[idx]:.6f}")
+    
+    print("\n")
+    
+    w0, M = M_and_w0(y, h_est)
+    x_recovered, x_bin = recover(y, h_est, w0, M)
+    decoded_text = decode_message(x_bin, M)
+    calculate_mse(x_recovered, decoded_text, M)
+
 
 if __name__ == "__main__":
     main()
